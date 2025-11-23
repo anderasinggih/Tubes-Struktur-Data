@@ -1,4 +1,4 @@
-name: C/C++ Build & Test
+name: C++ CI
 
 on:
   push:
@@ -9,13 +9,13 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
+    
     steps:
     - name: Checkout Repository
       uses: actions/checkout@v4
 
-    - name: Compile Program
-      run: g++ -Wall -Wextra -std=c++17 -o ecommerce main.cpp category.cpp product.cpp
+    - name: Compile all .cpp files
+      run: g++ -Wall -Wextra -std=c++17 -o ecommerce $(find . -name "*.cpp")
 
     - name: Run Program (Optional)
       run: ./ecommerce
