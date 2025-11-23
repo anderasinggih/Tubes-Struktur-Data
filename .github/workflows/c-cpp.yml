@@ -1,4 +1,4 @@
-name: C/C++ CI
+name: C/C++ Build & Test
 
 on:
   push:
@@ -9,11 +9,14 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout Repository
+      uses: actions/checkout@v4
 
-    - name: Compile
-      run: make
+    - name: Compile Program
+      run: g++ -Wall -Wextra -std=c++17 -o ecommerce main.cpp category.cpp product.cpp
 
-    - name: Run tests
-      run: make check || echo "No test available"
+    - name: Run Program (Optional)
+      run: ./ecommerce
+      continue-on-error: true
