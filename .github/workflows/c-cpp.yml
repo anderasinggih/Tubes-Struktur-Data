@@ -14,9 +14,12 @@ jobs:
     - name: Checkout Repository
       uses: actions/checkout@v4
 
+    - name: Install dependencies
+      run: sudo apt-get update && sudo apt-get install -y g++ libcurl4-openssl-dev
+
     - name: Compile all .cpp files
       working-directory: Konter
-      run: g++ main.cpp -o konter -std=c++17 -I. -lcurl
+      run: g++ main.cpp -o konter -std=c++17 -lcurl
 
     - name: Run Program (Optional)
       working-directory: Konter
