@@ -15,8 +15,8 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Compile all .cpp files
-      run: g++ -Wall -Wextra -std=c++17 -o ecommerce $(find . -name "*.cpp")
-
+      run: g++ main.cpp -o konter -std=c++17 -I. -I/opt/homebrew/opt/curl/include -L/opt/homebrew/opt/curl/lib -lcurl
+      
     - name: Run Program (Optional)
-      run: ./ecommerce
+      run: ./konter
       continue-on-error: true
