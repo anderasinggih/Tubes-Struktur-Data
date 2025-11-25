@@ -1,1 +1,20 @@
-snprintf(hex, sizeof(hex), "%%%02X", c);
+NOTE
+
+g++ main.cpp -o konter -std=c++17 -I. -I/opt/homebrew/opt/curl/include -L/opt/homebrew/opt/curl/lib -lcurl
+
+seed
+superadmin
+12345
+
+library
+nlohman
+
+database
+firebase
+db KonterHP
+https://konterhp-9de3b-default-rtdb.asia-southeast1.firebasedatabase.app
+
+
+acces
+Superadmin	Can add stock, edit stock, delete stock, manage admin accounts, view all stock
+Admin	Can view own stock, update stock status to sold

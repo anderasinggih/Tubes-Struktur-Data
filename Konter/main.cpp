@@ -9,22 +9,20 @@
 #include "nlohmann/json.hpp"
 
 using json = nlohmann::json;
-
 using namespace std;
 
 // ============= FIREBASE SETTINGS =============
-const string FIREBASE_BASE = "https://konterhp-9de3b-default-rtdb.asia-southeast1.firebasedatabase.app"; // <-- GANTI DENGAN BASE URL MU (tanpa trailing slash)
+const string FIREBASE_BASE = "https://konterhp-9de3b-default-rtdb.asia-southeast1.firebasedatabase.app"; // <-- base URL (without trailing slash)
 
-// Helper URL-encode (simple)
+// Helper URL-encode (safe)
 string urlEncode(const string &value) {
     string encoded;
-    char hex[4];
+    char hex[8];
     for (unsigned char c : value) {
         if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
             encoded.push_back(c);
         } else {
             snprintf(hex, sizeof(hex), "%%%02X", c);
-
             encoded += hex;
         }
     }
@@ -78,31 +76,39 @@ void displayCategories(Category* root) {
     displayCategories(root->right);
 }
 
-// ================== STOCK SYSTEM ====================
+// ================== USER & STOCK STRUCTS ====================
+struct User {
+    string username;
+    string password;
+    string role; // "super" or "admin"
+};
+
 struct Phone {
     string kategori, varian, nomorSeri, memori, warna;
     long hargaBeli = 0, hargaJual = 0;
     string status = "Belum Terjual";
+    string owner; // username toko (e.g. TOKO1)
 };
 
 // in-memory storage
+vector<User> users;
 vector<Phone> stok;
 
 // Save to CSV (local backup)
 void saveToCSV() {
     ofstream file("database.csv");
-    file << "Kategori,Varian,Nomor Seri,Memori,Warna,Harga Beli,Harga Jual,Status\n";
+    file << "Kategori,Varian,Nomor Seri,Memori,Warna,Harga Beli,Harga Jual,Status,Owner\n";
     for (auto &p : stok) {
         file << p.kategori << "," << p.varian << "," << p.nomorSeri << "," << p.memori << "," 
-             << p.warna << "," << p.hargaBeli << "," << p.hargaJual << "," << p.status << "\n";
+             << p.warna << "," << p.hargaBeli << "," << p.hargaJual << "," << p.status << "," << p.owner << "\n";
     }
     file.close();
 }
 
 // =========== FIREBASE REST HELPERS ===========
-// PUT (create or replace) /stok/<key>.json
-bool firebasePut(const string &key, const json &payload) {
-    string url = FIREBASE_BASE + "/stok/" + urlEncode(key) + ".json";
+// Generic: PUT /<node>/<key>.json
+bool firebasePutPath(const string &path, const string &key, const json &payload) {
+    string url = FIREBASE_BASE + "/" + path + "/" + urlEncode(key) + ".json";
     CURL *curl = curl_easy_init();
     if (!curl) return false;
 
@@ -129,9 +135,9 @@ bool firebasePut(const string &key, const json &payload) {
     return true;
 }
 
-// DELETE /stok/<key>.json
-bool firebaseDelete(const string &key) {
-    string url = FIREBASE_BASE + "/stok/" + urlEncode(key) + ".json";
+// Generic: DELETE /<path>/<key>.json
+bool firebaseDeletePath(const string &path, const string &key) {
+    string url = FIREBASE_BASE + "/" + path + "/" + urlEncode(key) + ".json";
     CURL *curl = curl_easy_init();
     if (!curl) return false;
     string response;
@@ -150,9 +156,9 @@ bool firebaseDelete(const string &key) {
     return true;
 }
 
-// GET /stok.json (all)
-bool firebaseGetAll(string &outBody) {
-    string url = FIREBASE_BASE + "/stok.json";
+// Generic: GET /<path>.json
+bool firebaseGetPath(const string &path, string &outBody) {
+    string url = FIREBASE_BASE + "/" + path + ".json";
     CURL *curl = curl_easy_init();
     if (!curl) return false;
     string response;
@@ -171,7 +177,46 @@ bool firebaseGetAll(string &outBody) {
     return true;
 }
 
+// ========= users helpers =========
+bool firebasePutUser(const string &username, const json &payload) {
+    return firebasePutPath("users", username, payload);
+}
+bool firebaseDeleteUser(const string &username) {
+    return firebaseDeletePath("users", username);
+}
+bool firebaseGetUsers(string &outBody) {
+    return firebaseGetPath("users", outBody);
+}
+
+// ========= stok helpers =========
+bool firebasePutStok(const string &nomorSeri, const json &payload) {
+    return firebasePutPath("stok", nomorSeri, payload);
+}
+bool firebaseDeleteStok(const string &nomorSeri) {
+    return firebaseDeletePath("stok", nomorSeri);
+}
+bool firebaseGetAllStok(string &outBody) {
+    return firebaseGetPath("stok", outBody);
+}
+
 // =========== SYNC HELPERS ===========
+// Convert User -> json
+json userToJson(const User &u) {
+    json j;
+    j["password"] = u.password;
+    j["role"] = u.role;
+    return j;
+}
+
+// Convert json -> User (key is username)
+User jsonToUser(const string &username, const json &j) {
+    User u;
+    u.username = username;
+    if (j.contains("password")) u.password = j["password"].get<string>();
+    if (j.contains("role")) u.role = j["role"].get<string>();
+    return u;
+}
+
 // Convert Phone -> json
 json phoneToJson(const Phone &p) {
     json j;
@@ -183,6 +228,7 @@ json phoneToJson(const Phone &p) {
     j["hargaBeli"] = p.hargaBeli;
     j["hargaJual"] = p.hargaJual;
     j["status"] = p.status;
+    j["owner"] = p.owner;
     return j;
 }
 
@@ -197,18 +243,57 @@ Phone jsonToPhone(const json &j) {
     if (j.contains("hargaBeli")) p.hargaBeli = j["hargaBeli"].get<long>();
     if (j.contains("hargaJual")) p.hargaJual = j["hargaJual"].get<long>();
     if (j.contains("status")) p.status = j["status"].get<string>();
+    if (j.contains("owner")) p.owner = j["owner"].get<string>();
     return p;
 }
 
-// Load all data from Firebase to stok vector (on startup)
+// Load users from Firebase
+void loadUsersFromFirebase() {
+    string body;
+    if (!firebaseGetUsers(body)) {
+        cout << "Gagal ambil users dari Firebase (network error)\n";
+        return;
+    }
+    users.clear();
+    if (body == "null" || body.empty()) {
+        // empty users
+        return;
+    }
+    try {
+        auto parsed = json::parse(body);
+        for (auto it = parsed.begin(); it != parsed.end(); ++it) {
+            string username = it.key();
+            json val = it.value();
+            User u = jsonToUser(username, val);
+            users.push_back(u);
+        }
+    } catch (exception &e) {
+        cerr << "Error parse JSON users: " << e.what() << endl;
+    }
+}
+
+// Ensure default users exist (create if none)
+void ensureDefaultUsers() {
+    if (!users.empty()) return;
+    cout << "No users found in Firebase — membuat akun default (superadmin/admin)\n";
+    User su; su.username = "superadmin"; su.password = "12345"; su.role = "super";
+    User ad; ad.username = "TOKO1"; ad.password = "admin"; ad.role = "admin";
+    if (firebasePutUser(su.username, userToJson(su))) {
+        users.push_back(su);
+    }
+    if (firebasePutUser(ad.username, userToJson(ad))) {
+        users.push_back(ad);
+    }
+}
+
+// Load stok from Firebase
 void loadFromFirebase() {
     string body;
-    if (!firebaseGetAll(body)) {
+    if (!firebaseGetAllStok(body)) {
         cout << "Gagal ambil data dari Firebase (network error)\n";
         return;
     }
     if (body == "null" || body.empty()) {
-        // no data
         stok.clear();
         return;
     }
@@ -217,10 +302,8 @@ void loadFromFirebase() {
         auto parsed = json::parse(body);
         stok.clear();
         for (auto it = parsed.begin(); it != parsed.end(); ++it) {
-            // key = it.key(); value = it.value()
             json val = it.value();
             Phone p = jsonToPhone(val);
-            // Ensure nomorSeri exists; if not, use key as nomorSeri
             if (p.nomorSeri.empty()) p.nomorSeri = it.key();
             stok.push_back(p);
         }
@@ -231,11 +314,81 @@ void loadFromFirebase() {
 }
 
 // =========== LOCAL UI / CRUD (sinkron ke Firebase) ===========
-void displayStock() {
-    cout << "\n=========== LIST STOCK HP ===========" << endl;
+
+void listAdmins() {
+    cout << "\n=== Daftar Akun Admin Toko ===\n";
+    for (auto &u : users) {
+        if (u.role == "admin") cout << " - " << u.username << "\n";
+    }
+}
+
+void addUserInteractive() {
+    User u;
+    cout << "\nMasukkan username (contoh: TOKO2): ";
+    cin >> ws; getline(cin, u.username);
+    cout << "Password: ";
+    cin >> ws; getline(cin, u.password);
+    u.role = "admin";
+
+    // check duplicate
+    for (auto &x : users) if (x.username == u.username) {
+        cout << "Username sudah ada!\n"; return;
+    }
+
+    if (firebasePutUser(u.username, userToJson(u))) {
+        users.push_back(u);
+        cout << "✅ Admin berhasil ditambahkan ke Firebase.\n";
+    } else {
+        cout << "❌ Gagal menambahkan admin ke Firebase.\n";
+    }
+}
+
+void editUserInteractive() {
+    string uname;
+    cout << "\nMasukkan username admin yang ingin diubah: ";
+    cin >> ws; getline(cin, uname);
+    auto it = find_if(users.begin(), users.end(), [&](const User &x){ return x.username == uname && x.role == "admin"; });
+    if (it == users.end()) { cout << "User tidak ditemukan atau bukan admin.\n"; return; }
+    cout << "Masukkan password baru (kosongkan untuk tidak mengubah): ";
+    string np; getline(cin, np);
+    if (!np.empty()) it->password = np;
+    if (firebasePutUser(it->username, userToJson(*it))) {
+        cout << "✅ Password user berhasil diupdate di Firebase.\n";
+    } else cout << "❌ Gagal update user di Firebase.\n";
+}
+
+void deleteUserInteractive() {
+    string uname;
+    cout << "\nMasukkan username admin yang ingin dihapus: ";
+    cin >> ws; getline(cin, uname);
+    auto it = find_if(users.begin(), users.end(), [&](const User &x){ return x.username == uname && x.role == "admin"; });
+    if (it == users.end()) { cout << "User tidak ditemukan atau bukan admin.\n"; return; }
+
+    // delete stocks owned by this user
+    vector<string> toDelete;
+    for (auto &p : stok) if (p.owner == uname) toDelete.push_back(p.nomorSeri);
+    for (auto &sn : toDelete) {
+        firebaseDeleteStok(sn);
+        // remove from local stok
+        stok.erase(remove_if(stok.begin(), stok.end(), [&](const Phone &x){ return x.nomorSeri == sn; }), stok.end());
+    }
+
+    if (firebaseDeleteUser(uname)) {
+        users.erase(it);
+        saveToCSV();
+        cout << "🗑 User dan semua stok miliknya telah dihapus.\n";
+    } else {
+        cout << "❌ Gagal menghapus user di Firebase.\n";
+    }
+}
+
+// Display all stock (superadmin)
+void displayStockAll() {
+    cout << "\n=========== LIST STOCK HP (SEMUA) ===========\n";
     int i = 1;
     for (auto &p : stok) {
         cout << "#" << i++ << endl;
+        cout << "Owner        : " << p.owner << endl;
         cout << "Kategori     : " << p.kategori << endl;
         cout << "Varian       : " << p.varian << endl;
         cout << "Nomor Seri   : " << p.nomorSeri << endl;
@@ -248,7 +401,7 @@ void displayStock() {
     }
 }
 
-// Add Stock (POST as PUT /stok/<nomorSeri>.json)
+// Add Stock (with owner selection)
 void addStockFirebase(Category* root) {
     Phone p;
     cout << "\n=== Tambah kategori (yang tersedia) ===\n";
@@ -268,18 +421,26 @@ void addStockFirebase(Category* root) {
     cin >> p.hargaBeli;
     cout << "Harga Jual   : ";
     cin >> p.hargaJual;
-    p.status = "Belum Terjual";
+
+    // choose owner (list admin usernames)
+    cout << "\nPilih owner (username admin). Daftar admin:\n";
+    for (auto &u : users) if (u.role == "admin") cout << " - " << u.username << "\n";
+    cout << "Masukkan owner: ";
+    cin >> ws; getline(cin, p.owner);
 
     if (p.nomorSeri.empty()) {
         cout << "Nomor seri tidak boleh kosong!\n";
         return;
     }
+    if (p.owner.empty()) {
+        cout << "Owner tidak boleh kosong!\n";
+        return;
+    }
 
-    // push to firebase using PUT with key = nomorSeri
+    p.status = "Belum Terjual";
     json payload = phoneToJson(p);
-    bool ok = firebasePut(p.nomorSeri, payload);
+    bool ok = firebasePutStok(p.nomorSeri, payload);
     if (ok) {
-        // update local vector (replace if exists)
         auto it = find_if(stok.begin(), stok.end(), [&](const Phone &x){ return x.nomorSeri == p.nomorSeri; });
         if (it != stok.end()) *it = p; else stok.push_back(p);
         saveToCSV();
@@ -289,7 +450,7 @@ void addStockFirebase(Category* root) {
     }
 }
 
-// Edit stock (modify fields and sync via PUT)
+// Edit stock (only superadmin)
 void editStockFirebase() {
     string sn;
     cout << "\nMasukkan nomor seri yang ingin diedit: ";
@@ -324,9 +485,13 @@ void editStockFirebase() {
     getline(cin, tmp);
     if (!tmp.empty()) p.hargaJual = stol(tmp);
 
-    // sync to firebase
+    // allow change owner
+    cout << "Owner (" << p.owner << "): ";
+    getline(cin, tmp);
+    if (!tmp.empty()) p.owner = tmp;
+
     json payload = phoneToJson(p);
-    bool ok = firebasePut(p.nomorSeri, payload);
+    bool ok = firebasePutStok(p.nomorSeri, payload);
     if (ok) {
         saveToCSV();
         cout << "\n📌 Data berhasil diupdate & disinkron ke Firebase!\n";
@@ -347,7 +512,7 @@ void deleteStockFirebase() {
         return;
     }
 
-    bool ok = firebaseDelete(sn);
+    bool ok = firebaseDeleteStok(sn);
     if (ok) {
         stok.erase(it);
         saveToCSV();
@@ -357,30 +522,35 @@ void deleteStockFirebase() {
     }
 }
 
-// Admin display simplified
-void displayForAdmin() {
-    cout << "\n=========== LIST HP UNTUK ADMIN TOKO ===========" << endl;
+// Admin display simplified (only owner's stok)
+void displayForAdmin(const string &owner) {
+    cout << "\n=========== LIST HP UNTUK " << owner << " ===========" << endl;
+    bool any = false;
     for (auto &p : stok) {
-        cout << p.varian << ", " << p.memori << ", " << p.warna 
-             << ", SN:" << p.nomorSeri << ", Harga: " << p.hargaJual 
-             << " (" << p.status << ")" << endl;
+        if (p.owner == owner) {
+            any = true;
+            cout << p.varian << ", " << p.memori << ", " << p.warna 
+                 << ", SN:" << p.nomorSeri << ", Harga: " << p.hargaJual 
+                 << " (" << p.status << ")" << endl;
+        }
     }
+    if (!any) cout << "Tidak ada stok untuk " << owner << endl;
 }
 
-// Update status -> set Terjual and sync
-void updateStatusFirebase() {
+// Update status -> set Terjual and sync (admin can)
+void updateStatusFirebase(const string &owner) {
     string sn;
     cout << "\nMasukkan nomor seri: ";
     cin >> ws; getline(cin, sn);
 
-    auto it = find_if(stok.begin(), stok.end(), [&](const Phone &x){ return x.nomorSeri == sn; });
+    auto it = find_if(stok.begin(), stok.end(), [&](const Phone &x){ return x.nomorSeri == sn && x.owner == owner; });
     if (it == stok.end()) {
-        cout << "\n❌ Nomor seri tidak ditemukan\n";
+        cout << "\n❌ Nomor seri tidak ditemukan atau bukan milik toko Anda\n";
         return;
     }
     it->status = "Terjual";
     json payload = phoneToJson(*it);
-    if (firebasePut(it->nomorSeri, payload)) {
+    if (firebasePutStok(it->nomorSeri, payload)) {
         saveToCSV();
         cout << "\n📌 Status berhasil diubah menjadi 'Terjual' & disinkron!\n";
     } else {
@@ -388,17 +558,21 @@ void updateStatusFirebase() {
     }
 }
 
-// ================== LOGIN SYSTEM ====================
-bool login(string &role) {
-    string user, pass;
+// ================== LOGIN SYSTEM (Firebase-based) ====================
+bool login(User &outUser) {
+    string u, p;
     cout << "\n========= LOGIN SYSTEM =========\n";
     cout << "Username : ";
-    cin >> user;
+    cin >> u;
     cout << "Password : ";
-    cin >> pass;
+    cin >> p;
 
-    if (user == "superadmin" && pass == "12345") { role = "super"; return true; }
-    if (user == "admin" && pass == "admin") { role = "admin"; return true; }
+    for (auto &usr : users) {
+        if (usr.username == u && usr.password == p) {
+            outUser = usr;
+            return true;
+        }
+    }
     return false;
 }
 
@@ -407,25 +581,33 @@ int main() {
     // init curl globally
     curl_global_init(CURL_GLOBAL_ALL);
 
+    // initial categories
     Category* root = NULL;
     root = insertCategory(root, "Android");
     root = insertCategory(root, "iPhone");
 
     // load data from firebase on startup
-    cout << "Mengambil data dari Firebase..." << endl;
+    cout << "Mengambil users dari Firebase..." << endl;
+    loadUsersFromFirebase();
+    ensureDefaultUsers(); // create default if empty
+    cout << "Users loaded: " << users.size() << endl;
+
+    cout << "Mengambil stok dari Firebase..." << endl;
     loadFromFirebase();
     cout << "Selesai mengambil data. (" << stok.size() << " records)\n";
 
-    string role;
-    if (!login(role)) {
+    User current;
+    if (!login(current)) {
         cout << "\n❌ Login gagal!\n";
         curl_global_cleanup();
         return 0;
     }
 
+    cout << "\n=== Selamat datang: " << current.username << " (" << current.role << ") ===\n";
+
     int choice;
     do {
-        if (role == "super") {
+        if (current.role == "super") {
             cout << "\n===== MENU SUPER ADMIN =====\n";
             cout << "1. Tambah kategori\n";
             cout << "2. Hapus kategori\n";
@@ -433,6 +615,7 @@ int main() {
             cout << "4. Edit produk (sync Firebase)\n";
             cout << "5. Hapus produk (sync Firebase)\n";
             cout << "6. Lihat semua stock\n";
+            cout << "7. Kelola akun admin toko\n";
             cout << "0. Logout\n";
             cout << "Pilih: ";
             cin >> choice;
@@ -457,20 +640,39 @@ int main() {
                 case 3: addStockFirebase(root); break;
                 case 4: editStockFirebase(); break;
                 case 5: deleteStockFirebase(); break;
-                case 6: displayStock(); break;
+                case 6: displayStockAll(); break;
+                case 7: {
+                    int sub;
+                    cout << "\n--- Kelola Akun Admin ---\n";
+                    cout << "1. Tambah admin\n";
+                    cout << "2. Edit admin (password)\n";
+                    cout << "3. Hapus admin\n";
+                    cout << "4. Lihat daftar admin\n";
+                    cout << "0. Kembali\n";
+                    cout << "Pilih: ";
+                    cin >> sub;
+                    switch (sub) {
+                        case 1: addUserInteractive(); break;
+                        case 2: editUserInteractive(); break;
+                        case 3: deleteUserInteractive(); break;
+                        case 4: listAdmins(); break;
+                        default: break;
+                    }
+                    break;
+                }
                 default: break;
             }
-        } else if (role == "admin") {
-            cout << "\n===== MENU ADMIN TOKO =====\n";
-            cout << "1. Lihat daftar HP\n";
-            cout << "2. Ubah status menjadi terjual (sync Firebase)\n";
+        } else if (current.role == "admin") {
+            cout << "\n===== MENU ADMIN TOKO (" << current.username << ") =====\n";
+            cout << "1. Lihat daftar HP (hanya milik toko)\n";
+            cout << "2. Ubah status menjadi terjual (hanya milik toko)\n";
             cout << "0. Logout\n";
             cout << "Pilih: ";
             cin >> choice;
 
             switch (choice) {
-                case 1: displayForAdmin(); break;
-                case 2: updateStatusFirebase(); break;
+                case 1: displayForAdmin(current.username); break;
+                case 2: updateStatusFirebase(current.username); break;
                 default: break;
             }
         }
