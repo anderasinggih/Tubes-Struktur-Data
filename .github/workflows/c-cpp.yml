@@ -15,8 +15,10 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Compile all .cpp files
-      run: g++ main.cpp -o konter -std=c++17 -I. -I/opt/homebrew/opt/curl/include -L/opt/homebrew/opt/curl/lib -lcurl
-      
+      working-directory: Konter
+      run: g++ main.cpp -o konter -std=c++17 -I. -lcurl
+
     - name: Run Program (Optional)
+      working-directory: Konter
       run: ./konter
       continue-on-error: true
