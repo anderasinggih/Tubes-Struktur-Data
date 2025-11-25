@@ -19,7 +19,7 @@ jobs:
 
     - name: Compile all .cpp files
       working-directory: Konter
-      run: g++ main.cpp -o konter -std=c++17 -lcurl
+      run: g++ main.cpp -o konter -std=c++17 -I. -I/opt/homebrew/opt/curl/include -L/opt/homebrew/opt/curl/lib -lcurl
 
     - name: Run Program (Optional)
       working-directory: Konter
