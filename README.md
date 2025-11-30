@@ -19,3 +19,6 @@ database
 acces
 - Superadmin	Can add stock, edit stock, delete stock, manage admin accounts, view all stock
 - Admin	Can view own stock, update stock status to sold
+
+project document
+https://miro.com/app/board/uXjVJirXZPQ=/?share_link_id=684320615295

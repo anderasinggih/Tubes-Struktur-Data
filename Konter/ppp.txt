@@ -18,3 +18,46 @@ https://konterhp-9de3b-default-rtdb.asia-southeast1.firebasedatabase.app
 acces
 Superadmin	Can add stock, edit stock, delete stock, manage admin accounts, view all stock
 Admin	Can view own stock, update stock status to sold
+
+
+graph TD
+    A([Mulai]) --> B[Init Library & Load Firebase]
+    B --> C[Bangun Tree: Kategori & Merek]
+    C --> D[/Input Login/]
+    D --> E{Login Valid?}
+    E -- Tidak --> F([Selesai])
+    E -- Ya --> G{Cek Role}
+
+    %% Alur Admin Biasa
+    G -- Admin --> H[Menu Admin]
+    H --> I{Pilih Menu}
+    I -- 1: Lihat Stok --> H
+    I -- 2: Set Terjual --> J[Sync Firebase]
+    J --> H
+    I -- 0: Keluar --> F
+
+    %% Alur Super Admin
+    G -- Super Admin --> K[Menu Super Admin]
+    K --> L{Pilih Menu}
+    
+    %% Tree Logic
+    L -- 1/4: Kategori --> M[Update Parent Tree]
+    L -- 2: Tambah Merek --> N[Update Child Tree]
+    L -- 3: Lihat Tree --> K
+    
+    %% Data Logic
+    L -- 5-7: User Admin --> O[CRUD User & Sync]
+    L -- 8-10: Stok --> P[CRUD Stok & Sync]
+    
+    %% Traversal Logic
+    L -- 11: View Mode --> Q{Sub Menu}
+    Q -- Filter Status --> K
+    Q -- Traversal Tree --> R[Pre/In/Post Order Merek]
+    R --> K
+    
+    %% Loop Backs
+    M --> K
+    N --> K
+    O --> K
+    P --> K
+    L -- 0: Keluar --> F

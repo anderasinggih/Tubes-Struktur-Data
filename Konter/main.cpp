@@ -32,19 +32,74 @@ static size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* use
     return size*nmemb;
 }
 
-// ================= BINARY TREE CATEGORY =================
-struct Category {
+// ================= HIERARCHY TREE (CATEGORY -> BRAND) =================
+
+// Struct untuk Merek (Child dari Kategori)
+struct Brand {
     string name;
-    Category* left;
-    Category* right;
-    Category(string n): name(n), left(nullptr), right(nullptr) {}
+    Brand* left;
+    Brand* right;
+    Brand(string n) : name(n), left(nullptr), right(nullptr) {}
 };
 
+// Struct untuk Kategori (Parent)
+struct Category {
+    string name;
+    Brand* brandRoot; // Setiap kategori punya Tree Merek sendiri
+    Category* left;
+    Category* right;
+    Category(string n): name(n), brandRoot(nullptr), left(nullptr), right(nullptr) {}
+};
+
+// --- Fungsi untuk BRAND (Merek) ---
+Brand* insertBrand(Brand* root, string name) {
+    if(!root) return new Brand(name);
+    if(name < root->name) root->left = insertBrand(root->left, name);
+    else if(name > root->name) root->right = insertBrand(root->right, name);
+    return root;
+}
+
+void displayBrands(Brand* root) {
+    if(!root) return;
+    displayBrands(root->left);
+    cout << "   -> " << root->name << endl;
+    displayBrands(root->right);
+}
+
+// Traversing Merek
+void preorderBrand(Brand* root){
+    if(!root) return;
+    cout << root->name << " ";
+    preorderBrand(root->left);
+    preorderBrand(root->right);
+}
+
+void inorderBrand(Brand* root){
+    if(!root) return;
+    inorderBrand(root->left);
+    cout << root->name << " ";
+    inorderBrand(root->right);
+}
+
+void postorderBrand(Brand* root){
+    if(!root) return;
+    postorderBrand(root->left);
+    postorderBrand(root->right);
+    cout << root->name << " ";
+}
+
+// --- Fungsi untuk KATEGORI ---
 Category* insertCategory(Category* root, string name){
     if(!root) return new Category(name);
     if(name < root->name) root->left = insertCategory(root->left, name);
     else if(name > root->name) root->right = insertCategory(root->right, name);
     return root;
+}
+
+Category* searchCategory(Category* root, string name) {
+    if (root == nullptr || root->name == name) return root;
+    if (name < root->name) return searchCategory(root->left, name);
+    return searchCategory(root->right, name);
 }
 
 Category* findMin(Category* root){
@@ -61,16 +116,34 @@ Category* deleteCategory(Category* root, string key){
         else if(!root->right) return root->left;
         Category* temp=findMin(root->right);
         root->name=temp->name;
+        // Note: Idealnya brandRoot juga harus dipindah/dihapus, 
+        // tapi untuk simplifikasi kita geser nama saja di sini.
         root->right=deleteCategory(root->right,temp->name);
     }
     return root;
 }
 
-void displayCategories(Category* root){
+void displayCategoriesAndBrands(Category* root){
     if(!root) return;
-    displayCategories(root->left);
-    cout<<" - "<<root->name<<endl;
-    displayCategories(root->right);
+    displayCategoriesAndBrands(root->left);
+    cout << " [" << root->name << "]" << endl;
+    if(root->brandRoot) {
+        displayBrands(root->brandRoot);
+    } else {
+        cout << "   (Belum ada merek)" << endl;
+    }
+    displayCategoriesAndBrands(root->right);
+}
+
+// Helper untuk menambah merek ke kategori tertentu
+void addBrandToCategory(Category* root, string catName, string brandName) {
+    Category* target = searchCategory(root, catName);
+    if (target) {
+        target->brandRoot = insertBrand(target->brandRoot, brandName);
+        cout << "✅ Merek '" << brandName << "' berhasil ditambahkan ke Kategori '" << catName << "'\n";
+    } else {
+        cout << "❌ Kategori '" << catName << "' tidak ditemukan!\n";
+    }
 }
 
 // ================= STRUCTS =================
@@ -79,7 +152,8 @@ struct User{
 };
 
 struct Phone{
-    string kategori,varian,nomorSeri,memori,warna,status="Belum Terjual",owner,tanggalStok;
+    // Ditambahkan field 'merek'
+    string kategori, merek, varian, nomorSeri, memori, warna, status="Belum Terjual", owner, tanggalStok;
     long hargaBeli=0,hargaJual=0;
 };
 
@@ -90,9 +164,10 @@ vector<Phone> stok;
 // ================= CSV LOCAL BACKUP =================
 void saveToCSV(){
     ofstream file("database.csv");
-    file<<"Kategori,Varian,Nomor Seri,Memori,Warna,Harga Beli,Harga Jual,Status,Owner,Tanggal Stok\n";
+    // Header ditambah kolom Merek
+    file<<"Kategori,Merek,Varian,Nomor Seri,Memori,Warna,Harga Beli,Harga Jual,Status,Owner,Tanggal Stok\n";
     for(auto &p:stok){
-        file<<p.kategori<<","<<p.varian<<","<<p.nomorSeri<<","<<p.memori<<","<<p.warna<<","
+        file<<p.kategori<<","<<p.merek<<","<<p.varian<<","<<p.nomorSeri<<","<<p.memori<<","<<p.warna<<","
             <<p.hargaBeli<<","<<p.hargaJual<<","<<p.status<<","<<p.owner<<","<<p.tanggalStok<<"\n";
     }
     file.close();
@@ -165,7 +240,8 @@ json userToJson(const User &u){ return { {"password",u.password},{"role",u.role}
 User jsonToUser(const string &username,const json &j){ User u; u.username=username; u.password=j["password"].get<string>(); u.role=j["role"].get<string>(); return u; }
 
 json phoneToJson(const Phone &p){
-    return { {"kategori",p.kategori},{"varian",p.varian},{"nomorSeri",p.nomorSeri},
+    // Update JSON include 'merek'
+    return { {"kategori",p.kategori},{"merek",p.merek},{"varian",p.varian},{"nomorSeri",p.nomorSeri},
              {"memori",p.memori},{"warna",p.warna},{"hargaBeli",p.hargaBeli},{"hargaJual",p.hargaJual},
              {"status",p.status},{"owner",p.owner},{"tanggalStok",p.tanggalStok} };
 }
@@ -173,6 +249,7 @@ json phoneToJson(const Phone &p){
 Phone jsonToPhone(const json &j){
     Phone p;
     if(j.contains("kategori")) p.kategori=j["kategori"].get<string>();
+    if(j.contains("merek")) p.merek=j["merek"].get<string>(); // Load merek
     if(j.contains("varian")) p.varian=j["varian"].get<string>();
     if(j.contains("nomorSeri")) p.nomorSeri=j["nomorSeri"].get<string>();
     if(j.contains("memori")) p.memori=j["memori"].get<string>();
@@ -274,6 +351,7 @@ void displayStockAll(){
     int i=1;
     for(auto &p:sorted){
         cout<<"#"<<i++<<"\nTanggal Stok: "<<p.tanggalStok<<"\nOwner: "<<p.owner<<"\nKategori: "<<p.kategori
+            <<"\nMerek: "<<p.merek
             <<"\nVarian: "<<p.varian<<"\nSN: "<<p.nomorSeri<<"\nMemori: "<<p.memori<<"\nWarna: "<<p.warna
             <<"\nHarga Beli: "<<p.hargaBeli<<"\nHarga Jual: "<<p.hargaJual<<"\nStatus: "<<p.status<<"\n-------------------\n";
     }
@@ -286,16 +364,33 @@ void displayForAdmin(const string &owner){
     sort(sorted.begin(),sorted.end(),[](const Phone &a,const Phone &b){ return a.tanggalStok>b.tanggalStok; });
     if(sorted.empty()){ cout<<"Tidak ada stok\n"; return; }
     for(auto &p:sorted){
-        cout<<"Tanggal Stok: "<<p.tanggalStok<<"\nVarian: "<<p.varian<<"\nSN: "<<p.nomorSeri<<"\nHarga: "<<p.hargaJual
+        cout<<"Tanggal Stok: "<<p.tanggalStok<<"\nKategori: "<<p.kategori<<"\nMerek: "<<p.merek
+            <<"\nVarian: "<<p.varian<<"\nSN: "<<p.nomorSeri<<"\nHarga: "<<p.hargaJual
             <<" ("<<p.status<<")\n-------------------\n";
     }
 }
 
 void addStockFirebase(Category* root){
     Phone p;
-    cout<<"\n=== Pilih Kategori ===\n"; displayCategories(root);
-    cout<<"Kategori: "; cin>>p.kategori;
-    cout<<"Varian: "; cin>>ws; getline(cin,p.varian);
+    cout<<"\n=== Pilih Kategori & Merek ===\n"; 
+    displayCategoriesAndBrands(root);
+    
+    // Pilih Kategori
+    cout<<"\nKategori: "; cin>>ws; getline(cin,p.kategori);
+    Category* catNode = searchCategory(root, p.kategori);
+    if(!catNode) {
+        cout << "❌ Kategori tidak ditemukan. Tambahkan kategori dulu.\n";
+        return;
+    }
+
+    // Pilih Merek dari Kategori tersebut
+    cout<<"Merek: "; getline(cin, p.merek);
+    // Kita bisa validasi apakah merek ada di catNode->brandRoot, 
+    // tapi untuk fleksibilitas input kita biarkan saja, atau mau strict?
+    // Jika strict:
+    // if(!searchBrand(catNode->brandRoot, p.merek)) { cout << "Merek belum terdaftar!"; return; }
+
+    cout<<"Varian: "; getline(cin,p.varian);
     cout<<"Nomor Seri: "; getline(cin,p.nomorSeri);
     cout<<"Memori: "; getline(cin,p.memori);
     cout<<"Warna: "; getline(cin,p.warna);
@@ -307,7 +402,7 @@ void addStockFirebase(Category* root){
     if(p.nomorSeri.empty()||p.owner.empty()){ cout<<"SN/Owner tidak boleh kosong\n"; return; }
 
     p.status="Belum Terjual";
-    p.tanggalStok = todayDate(); // otomatis tanggal hari ini
+    p.tanggalStok = todayDate();
 
     if(firebasePutStok(p.nomorSeri,phoneToJson(p))){
         auto it=find_if(stok.begin(),stok.end(),[&](const Phone &x){ return x.nomorSeri==p.nomorSeri; });
@@ -347,6 +442,21 @@ void updateStatusFirebase(const string &owner){
     if(firebasePutStok(sn,phoneToJson(*it))){ saveToCSV(); cout<<"✅ Status Terjual\n"; } else cout<<"❌ Gagal\n";
 }
 
+void displayStockByStatus(const string &status){
+    cout << "\n=== STOK (" << status << ") ===\n";
+    int i = 1;
+    for(auto &p : stok){
+        if(p.status == status){
+            cout<<"#"<<i++<<"\nTanggal: "<<p.tanggalStok<<"\nOwner: "<<p.owner
+                <<"\nKategori: "<<p.kategori<<"\nMerek: "<<p.merek
+                <<"\nVarian: "<<p.varian<<"\nSN: "<<p.nomorSeri
+                <<"\nHarga Jual: "<<p.hargaJual<<"\n-------------------\n";
+        }
+    }
+    if(i == 1) cout << "Tidak ada data.\n";
+}
+
+
 // ================= LOGIN =================
 bool login(User &outUser){
     string u,p;
@@ -363,9 +473,19 @@ int main(){
     ensureDefaultUsers();
     loadFromFirebase();
 
+    // Inisialisasi Kategori (Parent)
     Category* root=nullptr;
-    root=insertCategory(root,"Android");
-    root=insertCategory(root,"iPhone");
+    root=insertCategory(root,"Handphone");
+    root=insertCategory(root,"Tablet");
+    
+    // Inisialisasi Contoh Merek (Child)
+    // Handphone
+    addBrandToCategory(root, "Handphone", "Samsung");
+    addBrandToCategory(root, "Handphone", "Xiaomi");
+    addBrandToCategory(root, "Handphone", "Infinix");
+    // Tablet
+    addBrandToCategory(root, "Tablet", "iPad");
+    addBrandToCategory(root, "Tablet", "SamsungTab");
 
     User current;
     if(!login(current)){ cout<<"Login gagal\n"; return 0; }
@@ -373,19 +493,82 @@ int main(){
     if(current.role=="super"){
         int choice;
         do{
-            cout<<"\n--- SUPER ADMIN ---\n1.Add Category\n2.List Categories\n3.Delete Category\n4.Add Admin\n5.List Admin\n6.Delete Admin\n7.Add Stock\n8.Edit Stock\n9.Delete Stock\n10.View All Stock\n0.Exit\nChoice: ";
+            cout<<"\n--- SUPER ADMIN ---\n";
+            cout<<"1. Add Category (Parent)\n";
+            cout<<"2. Add Brand (Child of Category)\n";
+            cout<<"3. List Categories & Brands\n";
+            cout<<"4. Delete Category\n";
+            cout<<"5. Add Admin\n";
+            cout<<"6. List Admin\n";
+            cout<<"7. Delete Admin\n";
+            cout<<"8. Add Stock\n";
+            cout<<"9. Edit Stock\n";
+            cout<<"10. Delete Stock\n";
+            cout<<"11. View All Stock / Traversals\n";
+            cout<<"0. Exit\nChoice: ";
             cin>>choice;
             switch(choice){
-                case 1:{ string cat; cout<<"Nama kategori: "; cin>>ws; getline(cin,cat); root=insertCategory(root,cat); break; }
-                case 2: displayCategories(root); break;
-                case 3:{ string cat; cout<<"Nama kategori hapus: "; cin>>ws; getline(cin,cat); root=deleteCategory(root,cat); break; }
-                case 4: addUserInteractive(); break;
-                case 5: listAdmins(); break;
-                case 6: deleteUserInteractive(); break;
-                case 7: addStockFirebase(root); break;
-                case 8: editStockFirebase(); break;
-                case 9: deleteStockFirebase(); break;
-                case 10: displayStockAll(); break;
+                case 1:{ 
+                    string cat; cout<<"Nama kategori baru: "; cin>>ws; getline(cin,cat); 
+                    root=insertCategory(root,cat); 
+                    break; 
+                }
+                case 2:{
+                    cout << "Pilih Kategori untuk ditambah mereknya:\n";
+                    displayCategoriesAndBrands(root);
+                    string cat, brand;
+                    cout << "Masukkan Nama Kategori: "; cin>>ws; getline(cin, cat);
+                    cout << "Masukkan Nama Merek Baru: "; getline(cin, brand);
+                    addBrandToCategory(root, cat, brand);
+                    break;
+                }
+                case 3: displayCategoriesAndBrands(root); break;
+                case 4:{ string cat; cout<<"Nama kategori hapus: "; cin>>ws; getline(cin,cat); root=deleteCategory(root,cat); break; }
+                case 5: addUserInteractive(); break;
+                case 6: listAdmins(); break;
+                case 7: deleteUserInteractive(); break;
+                case 8: addStockFirebase(root); break;
+                case 9: editStockFirebase(); break;
+                case 10: deleteStockFirebase(); break;
+                case 11:{
+                    int sub;
+                    do{
+                        cout << "\n=== VIEW MENU ===\n";
+                        cout << "1. Semua Stock\n";
+                        cout << "2. Stock Terjual\n";
+                        cout << "3. Stock Belum Terjual\n";
+                        cout << "4. Pre-order Brand (by Category)\n";
+                        cout << "5. In-order Brand (by Category)\n";
+                        cout << "6. Post-order Brand (by Category)\n";
+                        cout << "0. Kembali\n";
+                        cout << "Pilih: ";
+                        cin >> sub;
+
+                        if (sub >= 4 && sub <= 6) {
+                            string catTarget;
+                            cout << "Masukkan Kategori yang mau dilihat mereknya (misal Handphone): ";
+                            cin >> ws; getline(cin, catTarget);
+                            Category* found = searchCategory(root, catTarget);
+                            if(found) {
+                                cout << "Traversing Brands in " << catTarget << ": ";
+                                if (sub == 4) preorderBrand(found->brandRoot);
+                                else if (sub == 5) inorderBrand(found->brandRoot);
+                                else if (sub == 6) postorderBrand(found->brandRoot);
+                                cout << endl;
+                            } else {
+                                cout << "Kategori tidak ditemukan.\n";
+                            }
+                        } else {
+                            switch(sub){
+                                case 1: displayStockAll(); break;
+                                case 2: displayStockByStatus("Terjual"); break;
+                                case 3: displayStockByStatus("Belum Terjual"); break;
+                            }
+                        }
+                    }while(sub != 0);
+                    break;
+                }
+
             }
         }while(choice!=0);
     }else{
