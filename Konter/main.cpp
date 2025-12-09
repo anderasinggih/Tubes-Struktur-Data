@@ -13,7 +13,6 @@ using json = nlohmann::json;
 using namespace std;
 
 // ================= FIREBASE SETTINGS =================
-// Pastikan URL diakhiri tanpa slash, nanti slash ditambahkan helper
 const string FIREBASE_BASE = "https://konterhp-9de3b-default-rtdb.asia-southeast1.firebasedatabase.app";
 
 // URL encode helper
@@ -117,8 +116,7 @@ Category* deleteCategory(Category* root, string key){
         else if(!root->right) return root->left;
         Category* temp=findMin(root->right);
         root->name=temp->name;
-        // Note: Idealnya brandRoot juga harus dipindah/dihapus, 
-        // tapi untuk simplifikasi kita geser nama saja di sini.
+        
         root->right=deleteCategory(root->right,temp->name);
     }
     return root;
