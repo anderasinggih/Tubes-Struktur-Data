@@ -16,6 +16,9 @@ database
 - firebase, db KonterHP, https://konterhp-9de3b-default-rtdb.asia-southeast1.firebasedatabase.app
 
 
+documents
+- https://miro.com/app/board/uXjVJirXZPQ=/?share_link_id=684320615295
+
 acces
 - Superadmin	Can add stock, edit stock, delete stock, manage admin accounts, view all stock
 - Admin	Can view own stock, update stock status to sold
