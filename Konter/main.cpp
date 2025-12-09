@@ -13,6 +13,7 @@ using json = nlohmann::json;
 using namespace std;
 
 // ================= FIREBASE SETTINGS =================
+// Pastikan URL diakhiri tanpa slash, nanti slash ditambahkan helper
 const string FIREBASE_BASE = "https://konterhp-9de3b-default-rtdb.asia-southeast1.firebasedatabase.app";
 
 // URL encode helper
@@ -135,15 +136,14 @@ void displayCategoriesAndBrands(Category* root){
     displayCategoriesAndBrands(root->right);
 }
 
-// Helper untuk menambah merek ke kategori tertentu
-void addBrandToCategory(Category* root, string catName, string brandName) {
+// Helper untuk menambah merek ke kategori tertentu (IN MEMORY)
+bool addBrandToCategory(Category* root, string catName, string brandName) {
     Category* target = searchCategory(root, catName);
     if (target) {
         target->brandRoot = insertBrand(target->brandRoot, brandName);
-        cout << "✅ Merek '" << brandName << "' berhasil ditambahkan ke Kategori '" << catName << "'\n";
-    } else {
-        cout << "❌ Kategori '" << catName << "' tidak ditemukan!\n";
-    }
+        return true;
+    } 
+    return false;
 }
 
 // ================= STRUCTS =================
@@ -152,7 +152,6 @@ struct User{
 };
 
 struct Phone{
-    // Ditambahkan field 'merek'
     string kategori, merek, varian, nomorSeri, memori, warna, status="Belum Terjual", owner, tanggalStok;
     long hargaBeli=0,hargaJual=0;
 };
@@ -164,7 +163,6 @@ vector<Phone> stok;
 // ================= CSV LOCAL BACKUP =================
 void saveToCSV(){
     ofstream file("database.csv");
-    // Header ditambah kolom Merek
     file<<"Kategori,Merek,Varian,Nomor Seri,Memori,Warna,Harga Beli,Harga Jual,Status,Owner,Tanggal Stok\n";
     for(auto &p:stok){
         file<<p.kategori<<","<<p.merek<<","<<p.varian<<","<<p.nomorSeri<<","<<p.memori<<","<<p.warna<<","
@@ -235,12 +233,79 @@ bool firebasePutStok(const string &nomorSeri,const json &payload){ return fireba
 bool firebaseDeleteStok(const string &nomorSeri){ return firebaseDeletePath("stok",nomorSeri); }
 bool firebaseGetAllStok(string &outBody){ return firebaseGetPath("stok",outBody); }
 
+// ================= TREE & BRAND FIREBASE SYNC =================
+
+// 1. Simpan Kategori Baru ke Firebase
+void saveCategoryToFirebase(const string &catName) {
+    json j; 
+    j["name"] = catName;
+    if(firebasePutPath("categories", catName, j)) {
+        cout << "✅ Kategori '" << catName << "' tersimpan di Firebase.\n";
+    } else {
+        cout << "❌ Gagal menyimpan kategori ke Firebase.\n";
+    }
+}
+
+// 2. Simpan Brand Baru ke Firebase (Nested under Category)
+void saveBrandToFirebase(const string &catName, const string &brandName) {
+    json j; 
+    j["name"] = brandName;
+    // Path: categories/Handphone/brands/Samsung
+    string path = "categories/" + urlEncode(catName) + "/brands";
+    if(firebasePutPath(path, brandName, j)) {
+        cout << "✅ Merek '" << brandName << "' tersimpan di Firebase.\n";
+    } else {
+        cout << "❌ Gagal menyimpan merek ke Firebase.\n";
+    }
+}
+
+// 3. Hapus Kategori dari Firebase
+void deleteCategoryFromFirebase(const string &catName) {
+    if(firebaseDeletePath("categories", catName)) {
+        cout << "🗑 Kategori '" << catName << "' dihapus dari Firebase.\n";
+    } else {
+        cout << "❌ Gagal menghapus kategori dari Firebase.\n";
+    }
+}
+
+// 4. Load Semua Tree (Category & Brand) dari Firebase saat Startup
+void loadTreeFromFirebase(Category* &root) {
+    string body;
+    if(!firebaseGetPath("categories", body)) { 
+        cout << "Gagal mengambil data categories dari Firebase.\n"; 
+        return; 
+    }
+    
+    if(body == "null" || body.empty()) return;
+
+    try {
+        auto parsed = json::parse(body);
+        // Iterasi setiap Kategori
+        for (auto& [key, val] : parsed.items()) {
+            string catName = key;
+            // Masukkan ke Tree Memory
+            root = insertCategory(root, catName);
+            
+            // Cek apakah ada brands di dalamnya
+            if(val.contains("brands")) {
+                for(auto& [bKey, bVal] : val["brands"].items()) {
+                    string brandName = bKey; // atau bVal["name"]
+                    addBrandToCategory(root, catName, brandName);
+                }
+            }
+        }
+        cout << "✅ Data Kategori & Merek berhasil dimuat dari Firebase.\n";
+    } catch(exception &e) {
+        cerr << "Error parsing categories: " << e.what() << endl;
+    }
+}
+
+
 // ================= JSON CONVERTERS =================
 json userToJson(const User &u){ return { {"password",u.password},{"role",u.role} }; }
 User jsonToUser(const string &username,const json &j){ User u; u.username=username; u.password=j["password"].get<string>(); u.role=j["role"].get<string>(); return u; }
 
 json phoneToJson(const Phone &p){
-    // Update JSON include 'merek'
     return { {"kategori",p.kategori},{"merek",p.merek},{"varian",p.varian},{"nomorSeri",p.nomorSeri},
              {"memori",p.memori},{"warna",p.warna},{"hargaBeli",p.hargaBeli},{"hargaJual",p.hargaJual},
              {"status",p.status},{"owner",p.owner},{"tanggalStok",p.tanggalStok} };
@@ -249,7 +314,7 @@ json phoneToJson(const Phone &p){
 Phone jsonToPhone(const json &j){
     Phone p;
     if(j.contains("kategori")) p.kategori=j["kategori"].get<string>();
-    if(j.contains("merek")) p.merek=j["merek"].get<string>(); // Load merek
+    if(j.contains("merek")) p.merek=j["merek"].get<string>();
     if(j.contains("varian")) p.varian=j["varian"].get<string>();
     if(j.contains("nomorSeri")) p.nomorSeri=j["nomorSeri"].get<string>();
     if(j.contains("memori")) p.memori=j["memori"].get<string>();
@@ -385,10 +450,7 @@ void addStockFirebase(Category* root){
 
     // Pilih Merek dari Kategori tersebut
     cout<<"Merek: "; getline(cin, p.merek);
-    // Kita bisa validasi apakah merek ada di catNode->brandRoot, 
-    // tapi untuk fleksibilitas input kita biarkan saja, atau mau strict?
-    // Jika strict:
-    // if(!searchBrand(catNode->brandRoot, p.merek)) { cout << "Merek belum terdaftar!"; return; }
+    // Kita bisa validasi jika mau, tapi biarkan saja untuk fleksibilitas
 
     cout<<"Varian: "; getline(cin,p.varian);
     cout<<"Nomor Seri: "; getline(cin,p.nomorSeri);
@@ -469,24 +531,17 @@ bool login(User &outUser){
 // ================= MAIN =================
 int main(){
     curl_global_init(CURL_GLOBAL_DEFAULT);
+    
+    // 1. Load Data Users & Stok (Existing)
     loadUsersFromFirebase();
     ensureDefaultUsers();
     loadFromFirebase();
 
-    // Inisialisasi Kategori (Parent)
+    // 2. Load Data Categories & Brands dari Firebase (NEW)
     Category* root=nullptr;
-    root=insertCategory(root,"Handphone");
-    root=insertCategory(root,"Tablet");
+    cout << "Loading Categories and Brands from Firebase...\n";
+    loadTreeFromFirebase(root);
     
-    // Inisialisasi Contoh Merek (Child)
-    // Handphone
-    addBrandToCategory(root, "Handphone", "Samsung");
-    addBrandToCategory(root, "Handphone", "Xiaomi");
-    addBrandToCategory(root, "Handphone", "Infinix");
-    // Tablet
-    addBrandToCategory(root, "Tablet", "iPad");
-    addBrandToCategory(root, "Tablet", "SamsungTab");
-
     User current;
     if(!login(current)){ cout<<"Login gagal\n"; return 0; }
 
@@ -510,7 +565,9 @@ int main(){
             switch(choice){
                 case 1:{ 
                     string cat; cout<<"Nama kategori baru: "; cin>>ws; getline(cin,cat); 
-                    root=insertCategory(root,cat); 
+                    // Update: Insert to Memory & Save to Firebase
+                    root = insertCategory(root, cat); 
+                    saveCategoryToFirebase(cat);
                     break; 
                 }
                 case 2:{
@@ -519,11 +576,24 @@ int main(){
                     string cat, brand;
                     cout << "Masukkan Nama Kategori: "; cin>>ws; getline(cin, cat);
                     cout << "Masukkan Nama Merek Baru: "; getline(cin, brand);
-                    addBrandToCategory(root, cat, brand);
+                    
+                    // Update: Insert to Memory & Save to Firebase
+                    if(addBrandToCategory(root, cat, brand)) {
+                        saveBrandToFirebase(cat, brand);
+                        cout << "✅ Merek berhasil ditambahkan ke Local & Firebase\n";
+                    } else {
+                        cout << "❌ Kategori '" << cat << "' tidak ditemukan!\n";
+                    }
                     break;
                 }
                 case 3: displayCategoriesAndBrands(root); break;
-                case 4:{ string cat; cout<<"Nama kategori hapus: "; cin>>ws; getline(cin,cat); root=deleteCategory(root,cat); break; }
+                case 4:{ 
+                    string cat; cout<<"Nama kategori hapus: "; cin>>ws; getline(cin,cat); 
+                    // Update: Delete from Memory & Firebase
+                    root = deleteCategory(root, cat); 
+                    deleteCategoryFromFirebase(cat);
+                    break; 
+                }
                 case 5: addUserInteractive(); break;
                 case 6: listAdmins(); break;
                 case 7: deleteUserInteractive(); break;
@@ -546,7 +616,7 @@ int main(){
 
                         if (sub >= 4 && sub <= 6) {
                             string catTarget;
-                            cout << "Masukkan Kategori yang mau dilihat mereknya (misal Handphone): ";
+                            cout << "Masukkan Kategori yang mau dilihat mereknya: ";
                             cin >> ws; getline(cin, catTarget);
                             Category* found = searchCategory(root, catTarget);
                             if(found) {
